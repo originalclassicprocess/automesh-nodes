@@ -1,0 +1,105 @@
+name: Publish verified node release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact version in package.json (existing releases are never overwritten)
+        required: true
+        default: '0.4.17'
+permissions:
+  contents: read
+concurrency:
+  group: public-node-release
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main' && github.repository == 'originalclassicprocess/automesh-nodes'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            edition: windows
+          - os: ubuntu-latest
+            edition: linux
+          - os: ubuntu-latest
+            edition: server
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - run: node scripts/release-context.mjs
+      - run: npm ci --ignore-scripts
+      - run: npm audit --audit-level=moderate
+      - run: npm test
+      - if: runner.os == 'Linux'
+        run: node scripts/check-server-unit.mjs
+      - if: matrix.edition == 'windows'
+        run: npm run build:windows
+      - if: matrix.edition == 'linux'
+        run: npm run build:linux
+      - if: matrix.edition == 'server'
+        shell: bash
+        run: |
+          export AUTOMESH_NPM_CLI="$(npm root -g)/npm/bin/npm-cli.js"
+          node scripts/build-server-release.mjs
+      - name: Attest actual release files
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: |
+            downloads/*.exe
+            downloads/*.tar.gz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: node-release-${{ matrix.edition }}
+          path: downloads/
+          if-no-files-found: error
+          retention-days: 14
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.repository == 'originalclassicprocess/automesh-nodes'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      attestations: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: node-release-*
+          path: downloads
+          merge-multiple: true
+      - name: Verify origin before publishing
+        shell: bash
+        run: |
+          node scripts/release-context.mjs
+          for file in downloads/*.exe downloads/*.tar.gz; do
+            gh attestation verify "$file" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" --source-ref refs/heads/main --source-digest "$GITHUB_SHA" --signer-digest "$GITHUB_SHA" --deny-self-hosted-runners --cert-oidc-issuer https://token.actions.githubusercontent.com --predicate-type https://slsa.dev/provenance/v1
+          done
+      - name: Publish immutable versioned assets
+        shell: bash
+        run: |
+          tag="v$RELEASE_VERSION"
+          if gh release view "$tag" >/dev/null 2>&1; then echo 'Release already exists; refusing overwrite'; exit 1; fi
+          gh release create "$tag" downloads/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Automesh Nodes $RELEASE_VERSION" --notes-file docs/RELEASE_0_4_17.md --latest

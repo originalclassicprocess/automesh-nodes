@@ -1,0 +1,17 @@
+import { execFileSync } from 'node:child_process';
+import { copyFile,mkdir,readFile,writeFile } from 'node:fs/promises';
+import { resolve,join,relative,isAbsolute } from 'node:path';
+import { createHash } from 'node:crypto';
+const root=resolve(import.meta.dirname,'..');
+const output=execFileSync(process.execPath,[join(root,'scripts/package-shared-host.mjs')],{cwd:root,encoding:'utf8',maxBuffer:1024*1024,timeout:240000});
+const result=JSON.parse(output.trim().split(/\r?\n/).at(-1));
+const version=JSON.parse(await readFile(join(root,'package.json'),'utf8')).version;
+const child=relative(join(root,'.release'),resolve(result.archive));
+if(result.sourceModified || result.version!==version || child.startsWith('..') || isAbsolute(child))throw Error('unverified_server_package');
+const bytes=await readFile(result.archive),sha256=createHash('sha256').update(bytes).digest('hex');
+if(sha256!==result.sha256)throw Error('server_package_hash');
+await mkdir(join(root,'downloads'),{recursive:true});
+const name=`Automesh-Server-Node-${version}-cPanel.tar.gz`;
+await copyFile(result.archive,join(root,'downloads',name));
+await writeFile(join(root,'downloads','node-server-release.json'),JSON.stringify({version,file:name,bytes:bytes.length,sha256,sourceCommit:result.baseRevision,edition:'server-cpanel'},null,2)+'\n');
+console.log('Verified separate server/cPanel release package prepared.');
