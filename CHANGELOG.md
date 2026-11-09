@@ -1,3 +1,7 @@
+# 0.4.17 — Public release provenance (2026-11-09)
+
+Versioned, attested Windows/Linux/Server builds in the public repository. No transport/runtime changes.
+
 ## 0.4.16 — Windows Personal release (2026-11-07)
 
 - Detect an unapproved current application origin after changing deployments; offer explicit approval without discarding other approved sites, secrets or queues.
