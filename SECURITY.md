@@ -5,8 +5,7 @@ security audit, anonymity guarantee or support lifetime is claimed.
 
 ## Reporting
 
-Use GitHub **Security → Report a vulnerability** when private reporting is
-available. Otherwise open an issue requesting a private contact, without
+Use GitHub **Security → Report a vulnerability** for a private report. Otherwise open an issue requesting a private contact, without
 vulnerability details or secrets. Do not post seeds, passwords, node keys,
 private invitations, configuration, real chat exports or identifying addresses.
 Use disposable profiles and include the version, adapter and redacted steps.

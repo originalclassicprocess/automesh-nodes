@@ -1,77 +1,19 @@
-# Новый хостинг: подключение к GitHub без прямого деплоя
+# Deploying your own hosting copy
 
-Приложение и ноды остаются в отдельных приватных репозиториях.
-Сначала проверяем SSH из GitHub Actions. Эта проверка ничего не загружает,
-не перезапускает приложения и не меняет DNS. Установку серверной ноды и
-обновление приложения выполняем отдельным следующим действием из GitHub.
+The public repositories contain source and credential-free build/test workflows.
+They do not contain the project's private production deployment jobs, SSH keys,
+hostnames, hosting usernames, operational logs or backups.
 
-## 1. Включить SSH на новом хостинге
+For your own deployment, keep operational automation in a separate private
+repository with narrowly scoped credentials and manually approved deployment.
+Do not expose secrets to contributor/fork code. Follow [server setup](SERVER_NODE.md)
+or [shared hosting](SHARED_HOSTING.md), using your own paths, origins and TLS.
 
-В панели хостинга включить Shell/SSH Access. Взять из панели точные hostname,
-SSH port и cPanel username. Домен приложения не использовать как адрес SSH,
-пока не проверено, что его DNS указывает на нужный новый сервер.
+The browser app, Windows Personal, Linux Personal and Server/cPanel packages
+are distinct. Do not install the Windows/Linux desktop package into cPanel.
+Do not run two instances against the same queue/key state. Back up private
+configuration and encrypted state separately from code. Reinstalling code is
+not permission to reset identities, queues or administrator ownership.
 
-Для каждого репозитория создать отдельную пару SSH-ключей. Публичный ключ
-добавить и авторизовать в SSH Access нового cPanel. Приватный ключ хранить
-только в GitHub Secret и закрытой резервной копии; не коммитить и не присылать
-в чат. Это ключ входа на хостинг, а не GitHub Deploy Key для чтения репозитория.
-
-## 2. Добавить отдельные Actions secrets в GitHub
-
-В каждом репозитории: Settings → Secrets and variables → Actions →
-New repository secret. Используем отдельные Repository Secrets с префиксом
-`NEW_HOSTING_`. Environment и платный план для этого способа не нужны.
-Задания репозитория смогут использовать эти секреты; доступ на запись в
-репозиторий должен оставаться у доверенных участников. Добавить пять секретов:
-
-| Secret | Значение из нового хостинга |
-|---|---|
-| `NEW_HOSTING_SSH_HOST` | hostname/IP SSH-сервера |
-| `NEW_HOSTING_SSH_PORT` | SSH port |
-| `NEW_HOSTING_SSH_USER` | cPanel username |
-
-| `NEW_HOSTING_SSH_PRIVATE_KEY` | полный приватный ключ выделенной пары |
-| `NEW_HOSTING_SSH_KNOWN_HOSTS` | проверенная запись known_hosts для этого сервера и порта |
-
-Имена намеренно отличаются от настроек старого хостинга: отсутствие новых
-значений останавливает проверку, не включает прежний сервер как резерв.
-
-Ключ хоста проверяется по отпечатку, полученному через доверенную панель/
-терминал нового хостинга. `ssh-keyscan` может получить запись, но сам по себе
-не подтверждает её подлинность. Не отключать StrictHostKeyChecking.
-
-## 3. Проверить соединение
-
-Actions → **Check new hosting SSH** → Run workflow → branch `main`.
-Успешный результат: `GitHub SSH connection OK. No application files changed.`
-Пока это только подтверждение доступа. Ничего на сервере ещё не установлено.
-
-## 4. Установка и обновления через GitHub
-
-Проверить корни отдельных приложений, Node.js 24, startup `app.cjs` и HTTPS.
-Старые адреса/ноды не меняются: целевые пути и origin задаются отдельными Secrets.
-
-- В `MeshAutonomy` задание **New hosting app release**, операция `deploy`,
-  скачивает опубликованный `v0.4.0`, сверяет checksum GitHub и внутренний manifest,
-  сохраняет старый код, обновляет и проверяет HTTPS/WSS. `rollback` восстанавливает
-  предыдущий код. `configure-peer` разрешает явно заданный браузерный origin
-  другого приложения; адреса подключения в клиенте автоматически не добавляются.
-- В `AutomeshNodes` задание **New hosting server node**, операция `install`,
-  использует отдельный пакет **Server Node / cPanel** из `v0.4.5`. Это только
-  первая установка в `automesh-node-app`: существующие ключи/данные/регистрации
-  не перезаписываются. Создаются отдельные закрытые config/data вне web root.
-- Если DNS или сертификат ещё не готовы, после успешной настройки нода остаётся
-  остановленной. После исправления HTTPS запустить `activate`, а не `install`:
-  активация сохраняет прежние ключи и проверяет публичный API и подписанный WSS.
-
-Windows и Linux Personal — отдельные пользовательские пакеты, они не
-распаковываются в cPanel. Старый workflow **Automesh release**
-не запускать для нового хостинга: он использует прежние имена настроек и требует
-публичную GitHub attestations-сборку; приватный выпуск не выдаётся за такую сборку.
-
-Дополнительные Repository Secrets для приложения: `NEW_HOSTING_APP_ROOT`,
-`NEW_HOSTING_APP_NODE_BIN`, `NEW_HOSTING_APP_ORIGIN`, необязательный
-`NEW_HOSTING_PEER_ORIGIN`. Для серверной ноды: `NEW_HOSTING_NODE_ORIGIN`,
-`NEW_HOSTING_NODE_ROOT`, `NEW_HOSTING_NODE_DOCUMENT_ROOT`,
-`NEW_HOSTING_APP_NODE_BIN` (проверенный Node.js 24 для начальной настройки),
-`NEW_HOSTING_APP_ORIGIN` и необязательный `NEW_HOSTING_PEER_ORIGIN`.
+Сценарии обновления реального хостинга проекта и доступы к нему остаются в
+приватных репозиториях. Открытие исходников не меняет серверы, DNS и сертификаты.
