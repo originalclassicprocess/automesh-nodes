@@ -125,6 +125,8 @@ test('managed node preserves mailbox and signed file delivery through private Un
   const receiptBody = { protocol: COURIER_PROTOCOL, from: bob.address, to: alice.address, id: value.body.id, digest: createHash('sha256').update(value.body.packet).digest('hex') };
   ws.send(JSON.stringify({ type: 'courier_receipt', to: restarted.node.courier.address, id: value.body.id.replaceAll('-', ''), receipt: JSON.stringify(await sign(bob, 'receipt', receiptBody)) }));
   await waitFor(() => restarted.node.courier.box.stats().messages === 0);
+  // Receipt persistence precedes asynchronous attachment cleanup; observe both.
+  await waitFor(() => restarted.node.courier.attachments.stats().files === 0);
   assert.equal(restarted.node.courier.attachments.stats().files, 0);
   assert.equal((await control(f, 'status')).members.length, 1);
 });
