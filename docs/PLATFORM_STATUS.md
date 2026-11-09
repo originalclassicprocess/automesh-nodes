@@ -1,5 +1,11 @@
 # Platform status — 8 November 2026
 
+Update 9 November: public release 0.4.17 now packages Windows, Linux and server
+from the clean public repository, with GitHub attestations. The table below
+records prior installed/distributed baselines and the remaining platform UX
+work; publishing new packages does not prove a clean Linux VM installation or
+add a macOS package. See [release notes](RELEASE_0_4_17.md).
+
 | Platform | Published package | Setup and recovery | Evidence / remaining work |
 | --- | --- | --- | --- |
 | Windows x64 | 0.4.16 installer | New full-window PC / PC + phone welcome, guided readiness/actions, retained queue/trust and reconnect maintenance | Automated checks and user PC/iPad connection trial; sustained overnight/resume/network-change acceptance still needed |

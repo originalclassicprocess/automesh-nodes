@@ -7,18 +7,23 @@ Optional personal messaging infrastructure for
 encrypted queues, Windows home launcher, Linux and server/cPanel adapters.
 Experimental public source preview; no independent security/cryptography audit.
 
+**Public packages:** [0.4.17 — Windows, Linux and separate server/cPanel archive](https://github.com/originalclassicprocess/automesh-nodes/releases/tag/v0.4.17).
+Built from a clean public commit by `release.yml`, with GitHub attestations for
+each binary/archive. This packaging release retains the existing runtime and
+platform setup behavior; publishing it does not update a running server.
+
 ## Editions
 
 | Edition | Interface / status |
 | --- | --- |
-| Windows x64 | Source 0.4.16; PC / PC + phone welcome and guided setup/recovery |
-| Linux Personal x64/glibc | Shared source 0.4.16; existing terminal HTTPS setup, CLI/service and web panel; Windows wizard not ported |
+| Windows x64 | 0.4.17; PC / PC + phone welcome and guided setup/recovery |
+| Linux Personal x64/glibc | 0.4.17; existing terminal HTTPS setup, CLI/service and web panel; Windows wizard not ported |
 | Server / cPanel | Separate server/Passenger adapters, operator-managed TLS/configuration; not a desktop installer |
 | macOS | Shared-core CI only; no packaged node, installer or wizard |
 
 This clean repository does not import old private release assets or CI logs.
 The previous distribution baselines were Windows 0.4.16 and Linux/server 0.4.12.
-Public Actions artifacts are build candidates, not new production releases.
+Preview Actions artifacts remain candidates; published packages are under Releases.
 [Platform readiness](docs/PLATFORM_STATUS.md) · [Edition details](docs/NODE_EDITIONS.md).
 
 ## Purpose and behavior
@@ -51,8 +56,8 @@ On the matching platform: `npm run build:windows` / `npm run build:linux`.
 Builders verify pinned official Node.js runtime hashes and include notices.
 Outputs are under `downloads/`; building does not install/start a node,
 import certificates or open firewall rules. Windows is not Authenticode-signed.
-Public main preview builds can carry GitHub attestations; verify the actual
-artifact and workflow identity, not just a checksum. No prior private artifact
+Public releases use `.github/workflows/release.yml`; verify the actual
+artifact and that workflow identity, not just a checksum or preview build. No prior private artifact
 is retroactively attested by this publication.
 
 [Windows](docs/WINDOWS_NODE.md) · [Linux](docs/LINUX_NODE.md) ·
