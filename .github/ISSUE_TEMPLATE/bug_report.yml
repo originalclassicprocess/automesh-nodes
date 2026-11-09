@@ -1,0 +1,25 @@
+name: Bug report
+description: Report unexpected behavior with disposable data
+body:
+  - type: markdown
+    attributes:
+      value: "For vulnerabilities follow SECURITY.md. Never post seeds, passwords, private QR links, node config, real chat exports or identifying network details."
+  - type: input
+    id: version
+    attributes:
+      label: Version and platform
+      description: App/node version, OS and browser; board/firmware only if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps with disposable data
+      description: Explain what you did, expected behavior and actual result.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted error or diagnostics
+      description: Remove tokens, addresses, names and private content before posting.

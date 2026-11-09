@@ -1,0 +1,107 @@
+import { test, afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, rm, readFile, writeFile, unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { once } from 'node:events';
+import { request as httpRequest } from 'node:http';
+import { createHash, webcrypto } from 'node:crypto';
+import { createNodeService } from '../packages/runtime/src/index.js';
+import { nodeProofBytes } from '../packages/protocol/src/index.js';
+import { createAdminPanel } from '../packages/runtime/src/panel.js';
+import { protector, identity } from './fixtures.mjs';
+const roots = [], services = [];
+const send = (url, options = {}) => new Promise((resolve, reject) => {
+  const request = httpRequest(url, options, response => { const chunks = []; response.on('data', chunk => chunks.push(chunk));
+    response.on('end', () => resolve(new Response(Buffer.concat(chunks), { status: response.statusCode, headers: response.headers }))); });
+  request.on('error', reject); request.end(options.body);
+});
+afterEach(async () => { for (const service of services.splice(0)) await service.close(); for (const path of roots.splice(0)) await rm(path, { recursive: true, force: true }); });
+async function fixture(options = {}) {
+  const directory = await mkdtemp(join(tmpdir(), 'automesh-panel-')); roots.push(directory);
+  const secretProtector = protector(), adminToken = 'f'.repeat(64), origin = 'https://node.example.test';
+  const node = await createNodeService({ directory, adminToken, secretProtector, testHttp: true, localRouteScope: 'internet',
+    signalingEnabled: false, origins: [origin, 'https://automesh.space'], hosts: ['node.example.test'],
+    panelConfig: { publicUrl: origin, appUrl: 'https://automesh.space' }, ...options }); services.push(node);
+  const server = node.createPublicServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  node.control.listen(0, '127.0.0.1'); await once(node.control, 'listening');
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const post = (path, value, headers = {}) => send(base + path, { method: 'POST', headers: { Host: 'node.example.test', Origin: origin, 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(value) });
+  const control = path => fetch(`http://127.0.0.1:${node.control.address().port}` + path, { method: 'POST', headers: { Authorization: `Bearer ${adminToken}` } });
+  const signed = async (person, path, body) => {
+    const bytes = Buffer.from(JSON.stringify(body)), digest = createHash('sha256').update(bytes).digest('hex');
+    const challenge = await (await post('/node/challenge', { address: person.address, method: 'POST', path, digest }, { Origin: 'https://automesh.space' })).json();
+    const signature = Buffer.from(await webcrypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, person.keys.privateKey, nodeProofBytes(node.state.value.nodeId, person.address, challenge.challenge, 'POST', path, digest))).toString('hex');
+    return post(path, body, { Origin: 'https://automesh.space', 'X-Automesh-Proof': Buffer.from(JSON.stringify({ address: person.address, publicKey: person.publicKey, signature, challenge: challenge.challenge })).toString('base64url') });
+  };
+  return { node, origin, base, directory, secretProtector, post, control, signed };
+}
+test('administrator requires a local bootstrap, signed approval and a tab-bound session; profile removal never promotes admins', async () => {
+  const f = await fixture(), person = await identity(), other = await identity();
+  assert.equal((await f.post('/admin/status', {})).status, 403);
+  const asset = await send(f.base, { headers: { Host: 'node.example.test' } });
+  assert.equal(asset.status, 200); assert.match(asset.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+  const start = await (await f.post('/admin/connect/start', {})).json();
+  assert.ok(!start.link.includes(start.pollToken));
+  const body = { publicUrl: f.origin, scope: 'node-admin-v1', ticket: start.ticket, code: '' };
+  assert.equal((await f.signed(person, '/admin/connect/approve', body)).status, 403);
+  const setup = await (await f.control('/admin-setup')).json();
+  assert.equal((await f.signed(person, '/admin/connect/approve', { ...body, code: setup.code, publicUrl: 'https://clone.example' })).status, 403);
+  assert.equal((await f.signed(person, '/admin/connect/approve', { ...body, code: setup.code })).status, 200);
+  assert.equal((await f.control('/admin-setup')).status, 409);
+  assert.equal((await f.post('/admin/connect/poll', { ticket: start.ticket, pollToken: '0'.repeat(64) })).status, 403);
+  const approved = await f.post('/admin/connect/poll', { ticket: start.ticket, pollToken: start.pollToken });
+  const cookie = approved.headers.get('set-cookie'); assert.match(cookie, /HttpOnly; Secure; SameSite=Strict/);
+  const Cookie = cookie.split(';')[0];
+  assert.equal((await f.post('/admin/connect/poll', { ticket: start.ticket, pollToken: start.pollToken })).status, 403);
+  const status = await (await f.post('/admin/status', {}, { Cookie })).json();
+  assert.equal(status.admin, person.address); assert.equal(status.memberLimit, 8); assert.equal(status.pairCode, undefined);
+  assert.equal((await f.post('/admin/invite', {}, { Cookie })).status, 403);
+  const headers = { Cookie, 'X-Automesh-CSRF': status.csrf };
+  assert.equal((await f.post('/admin/invite', {}, { ...headers, Origin: 'https://automesh.space' })).status, 403);
+  const { invitation: invite } = await (await f.post('/admin/invite', {}, headers)).json();
+  assert.equal(invite.protocol, 'automesh-node-pair-v1');
+  assert.equal((await f.signed(other, '/node/join', { code: invite.code })).status, 200);
+  assert.equal((await f.post('/admin/members/remove', { address: other.address, confirm: 'remove-node-data' }, headers)).status, 200);
+  assert.equal((await (await f.post('/admin/status', {}, { Cookie })).json()).admin, person.address);
+  const second = await (await f.post('/admin/connect/start', {})).json();
+  assert.equal((await f.signed(other, '/admin/connect/approve', { ...body, ticket: second.ticket, code: setup.code })).status, 403);
+  assert.equal((await f.signed(person, '/admin/connect/approve', { ...body, ticket: second.ticket })).status, 200);
+  const secondLogin = await f.post('/admin/connect/poll', { ticket: second.ticket, pollToken: second.pollToken });
+  const secondCookie = secondLogin.headers.get('set-cookie').split(';')[0];
+  assert.equal((await f.post('/admin/connect/cancel', { ticket: second.ticket, pollToken: second.pollToken })).status, 200);
+  assert.equal((await f.post('/admin/status', {}, { Cookie: secondCookie })).status, 403);
+  assert.equal((await f.post('/admin/logout', {}, headers)).status, 200);
+  assert.equal((await f.post('/admin/status', {}, { Cookie })).status, 403);
+  assert.ok(!(await readFile(join(f.directory, 'panel-admin.json'), 'utf8')).includes(person.publicKey));
+  await f.node.close();
+  const reopened = await createAdminPanel({ directory: f.directory, protector: f.secretProtector, publicUrl: f.origin, appUrl: 'https://automesh.space' });
+  assert.equal(reopened.configured, true); assert.throws(() => reopened.setup(), /panel_setup_denied/); reopened.close();
+  await writeFile(join(f.directory, 'panel-admin.json'), '{}');
+  await assert.rejects(createAdminPanel({ directory: f.directory, protector: f.secretProtector, publicUrl: f.origin, appUrl: 'https://automesh.space' }));
+  await unlink(join(f.directory, 'panel-admin.json'));
+  await assert.rejects(createAdminPanel({ directory: f.directory, protector: f.secretProtector, publicUrl: f.origin, appUrl: 'https://automesh.space', mustExist: true }), /panel_admin_missing/);
+});
+test('requests expire, foreign/missing Origin fails, and the Windows/LAN role has no admin extension', async () => {
+  let time = Date.now(); const f = await fixture({ now: () => time });
+  assert.equal((await f.post('/admin/connect/start', {}, { Origin: '' })).status, 403);
+  const started = await (await f.post('/admin/connect/start', {})).json();
+  time += 120001;
+  assert.equal((await f.post('/admin/connect/poll', { ticket: started.ticket, pollToken: started.pollToken })).status, 403);
+  const auth = new (await import('../packages/runtime/src/auth.js')).NodeAuth('a'.repeat(32));
+  const person = await identity();
+  assert.throws(() => auth.issue({ address: person.address, method: 'POST', path: '/admin/connect/approve', digest: 'b'.repeat(64) }), /invalid_challenge/);
+});
+test('expired admin sessions cannot act, and approval without a valid profile proof is denied', async () => {
+  let time = Date.now(); const f = await fixture({ now: () => time }), person = await identity();
+  const setup = await (await f.control('/admin-setup')).json(), start = await (await f.post('/admin/connect/start', {})).json();
+  const body = { publicUrl: f.origin, scope: 'node-admin-v1', ticket: start.ticket, code: setup.code };
+  assert.equal((await f.post('/admin/connect/approve', body)).status, 403);
+  assert.equal((await f.signed(person, '/admin/connect/approve', body)).status, 200);
+  assert.equal((await f.signed(person, '/admin/connect/approve', body)).status, 403);
+  const login = await f.post('/admin/connect/poll', { ticket: start.ticket, pollToken: start.pollToken });
+  const Cookie = login.headers.get('set-cookie').split(';')[0];
+  assert.equal((await f.post('/admin/status', {}, { Cookie })).status, 200);
+  time += 900001;
+  assert.equal((await f.post('/admin/status', {}, { Cookie })).status, 403);
+});

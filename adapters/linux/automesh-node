@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+task_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+case "$(uname -s):$(uname -m)" in Linux:x86_64) ;; *) printf '%s\n' 'This package requires Linux x64 (glibc).'; exit 1 ;; esac
+"$task_root/bin/node" "$task_root/adapters/linux/verify-release.mjs"
+case "${1:-help}" in
+  setup) exec "$task_root/bin/node" "$task_root/adapters/linux/setup.mjs" ;;
+  help) printf '%s\n' 'Automesh Node preview' './automesh-node setup   — guided first setup with your HTTPS certificate' './automesh-node start   — start your configured node' './automesh-node status | invite | admin-setup | qr-pair | qr-signal' 'Keep this terminal open. No firewall, root certificate, or service is installed automatically.' ;;
+  start|status|invite|admin-setup|qr-pair|qr-signal) exec "$task_root/bin/node" "$task_root/adapters/server/main.js" "$1" "$HOME/AutomeshNode/config/server-config.json" ;;
+  *) printf '%s\n' 'Unknown action. Run ./automesh-node help'; exit 1 ;;
+esac

@@ -1,0 +1,12 @@
+{
+  "name": "@automesh/node-protocol",
+  "version": "1.0.0",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.js",
+    "./*": "./src/*.js"
+  },
+  "files": ["src"],
+  "sideEffects": false
+}

@@ -1,0 +1,15 @@
+node_modules/
+.release/
+downloads/
+coverage/
+.env
+.env.*
+*.pfx
+*.key
+*.pem
+*.cred
+server-config.json
+config.json
+data/
+.DS_Store
+Thumbs.db

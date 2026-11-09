@@ -1,0 +1,43 @@
+import {test,afterEach} from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';import {join} from 'node:path';import {once} from 'node:events';
+import {createHash,randomBytes,webcrypto} from 'node:crypto';
+import {createNodeService} from '../packages/runtime/src/index.js';
+import {courierBytes,nodeProofBytes,ATTACHMENT_PROTOCOL,ATTACHMENT_CHUNK_BYTES} from '../packages/protocol/src/index.js';
+import {identity,protector,job} from './fixtures.mjs';
+const roots=[],services=[];
+afterEach(async()=>{for(const s of services.splice(0))await s.close();for(const r of roots.splice(0))await rm(r,{recursive:true,force:true});});
+const sign=async(who,purpose,body)=>({body,publicKey:who.publicKey,signature:Buffer.from(await webcrypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},who.keys.privateKey,courierBytes(purpose,body))).toString('hex')});
+test('owner grant and recipient proof scope guest list, chunks and receipts without membership or cross-owner access',async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'automesh-recipient-'));roots.push(directory);
+ const hosts=['127.0.0.1:0'],service=await createNodeService({directory,hosts,origins:['http://localhost:5173'],adminToken:'a'.repeat(64),secretProtector:protector(),testHttp:true,localRouteScope:'internet'});services.push(service);
+ const server=service.createPublicServer();server.listen(0,'127.0.0.1');await once(server,'listening');hosts.push('127.0.0.1:'+server.address().port);const url='http://'+hosts[1];
+ const [alice,bob,eve,other]=await Promise.all([identity(),identity(),identity(),identity()]);
+ await service.state.change(s=>{s.owner={address:alice.address,publicKey:alice.publicKey};s.members=[alice,other].map(w=>({address:w.address,publicKey:w.publicKey,senders:[]}));});
+ const api=async(who,path,body)=>{
+  const bytes=JSON.stringify(body),digest=createHash('sha256').update(bytes).digest('hex');
+  const c=await(await fetch(url+'/node/challenge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({address:who.address,method:'POST',path,digest})})).json();
+  const proof={address:who.address,publicKey:who.publicKey,challenge:c.challenge,signature:Buffer.from(await webcrypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},who.keys.privateKey,nodeProofBytes(c.nodeId,who.address,c.challenge,'POST',path,digest))).toString('hex')};
+  const response=await fetch(url+path,{method:'POST',headers:{'Content-Type':'application/json','X-Automesh-Proof':Buffer.from(JSON.stringify(proof)).toString('base64url')},body:bytes});return {status:response.status,value:await response.json()};
+ };
+ const node=service.courier,part=randomBytes(17),attachment={protocol:ATTACHMENT_PROTOCOL,id:randomBytes(16).toString('hex'),size:1,bytes:17,chunks:1,chunkBytes:ATTACHMENT_CHUNK_BYTES,digest:createHash('sha256').update(part).digest('hex')};
+ const text=await job(node.address,alice,bob),file=await job(node.address,alice,bob,attachment),foreign=await job(node.address,other,bob),notBob=await job(node.address,alice,eve);
+ await node.put(alice.address,text);await node.startFile(alice.address,file);await node.attachments.put(alice.address,attachment.id,0,part.toString('base64url'));await node.put(alice.address,file);await node.put(other.address,foreign);await node.put(alice.address,notBob);
+ const now=Date.now(),grant=await sign(alice,'recipient-inbox',{protocol:'automesh-recipient-inbox-v1',from:alice.address,to:bob.address,courier:node.address,nodeId:service.state.value.nodeId,issuedAt:now,expiresAt:now+60000});
+ assert.notEqual((await api(bob,'/inbox/list',{})).status,200); // existing membership boundary remains intact
+ assert.notEqual((await api(bob,'/receive/list',{})).status,200);
+ assert.notEqual((await api(eve,'/receive/list',{grant})).status,200);
+ assert.notEqual((await api(bob,'/receive/list',{grant:{...grant,signature:'a'.repeat(128)}})).status,200);
+ const expired=await sign(alice,'recipient-inbox',{...grant.body,issuedAt:now-60000,expiresAt:now-1});
+ assert.notEqual((await api(bob,'/receive/list',{grant:expired})).status,200);
+ const list=await api(bob,'/receive/list',{grant});assert.equal(list.status,200);assert.deepEqual(new Set(list.value.deliveries.map(d=>d.job.body.id)),new Set([text.body.id,file.body.id]));
+ const request=await sign(bob,'attachment-request',{protocol:ATTACHMENT_PROTOCOL,from:bob.address,to:node.address,id:attachment.id,index:0,requestId:randomBytes(16).toString('hex'),expiresAt:Date.now()+30000});
+ const chunks=await api(bob,'/receive/file/parts',{grant,request});assert.equal(chunks.status,200);assert.equal(chunks.value.parts[0].cipher,part.toString('base64url'));
+ const receipt=async j=>JSON.stringify(await sign(bob,'receipt',{protocol:'automesh-courier-v1',from:bob.address,to:j.body.from,id:j.body.id,digest:createHash('sha256').update(j.body.packet).digest('hex')}));
+ assert.notEqual((await api(bob,'/receive/ack',{grant,id:foreign.body.id.replaceAll('-',''),receipt:await receipt(foreign)})).status,200);
+ assert.equal((await api(bob,'/receive/ack',{grant,id:file.body.id.replaceAll('-',''),receipt:await receipt(file)})).status,200);
+ assert.equal(node.attachments.stats().files,0);assert.equal(node.stats().messages,3);assert.equal(service.state.value.members.length,2);
+ await service.state.change(s=>{s.members=s.members.filter(m=>m.address!==alice.address);});
+ assert.notEqual((await api(bob,'/receive/list',{grant})).status,200);
+});

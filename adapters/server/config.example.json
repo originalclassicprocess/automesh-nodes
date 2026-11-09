@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "dataDirectory": "/var/lib/automesh-node",
+  "publicUrl": "https://node.example.com",
+  "listenAddress": "127.0.0.1",
+  "port": 3003,
+  "controlPort": 3004,
+  "allowedOrigins": ["https://automesh.online"],
+  "masterKeyFile": "/etc/automesh-node/private/master.key",
+  "tlsCertFile": "/etc/automesh-node/private/tls-cert.pem",
+  "tlsKeyFile": "/etc/automesh-node/private/tls-key.pem",
+  "tlsCaFile": "/etc/ssl/certs/ca-certificates.crt",
+  "courierRelay": "",
+  "signalingEnabled": true,
+  "maxBytes": 67108864,
+  "maxMessages": 1000,
+  "maxFiles": 128,
+  "maxFilesPerProfile": 16
+}

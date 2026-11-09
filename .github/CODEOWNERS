@@ -1,0 +1,7 @@
+/.github/ @originalclassicprocess
+/packages/ @originalclassicprocess
+/adapters/ @originalclassicprocess
+/scripts/ @originalclassicprocess
+/LICENSE @originalclassicprocess
+/SECURITY* @originalclassicprocess
+/package*.json @originalclassicprocess

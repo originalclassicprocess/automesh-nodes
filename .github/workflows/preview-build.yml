@@ -1,0 +1,52 @@
+name: Build node previews (no deployment)
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  packages:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            command: build:windows
+            edition: windows
+          - os: ubuntu-latest
+            command: build:linux
+            edition: linux
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm audit --audit-level=moderate
+      - run: npm test
+      - if: runner.os == 'Linux'
+        run: node scripts/check-server-unit.mjs
+      - run: npm run ${{ matrix.command }}
+      - name: Attest public main build only
+        if: github.event.repository.visibility == 'public' && github.ref == 'refs/heads/main'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: |
+            downloads/*.exe
+            downloads/*.tar.gz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: automesh-node-${{ matrix.edition }}-preview
+          path: downloads/
+          if-no-files-found: error
+          retention-days: 14

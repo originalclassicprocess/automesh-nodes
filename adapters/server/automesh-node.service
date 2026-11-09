@@ -1,0 +1,44 @@
+[Unit]
+Description=Automesh personal node (server preview)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=automesh-node
+Group=automesh-node
+WorkingDirectory=/opt/automesh-nodes
+ExecStart=/usr/bin/node /opt/automesh-nodes/adapters/server/main.js start /etc/automesh-node/server-config.json
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGTERM
+UMask=0077
+StateDirectory=automesh-node
+StateDirectoryMode=0700
+# Encrypted credentials are provisioned by the operator, not stored in Git.
+LoadCredentialEncrypted=master-key:/etc/credstore.encrypted/automesh-master.cred
+LoadCredentialEncrypted=tls-key:/etc/credstore.encrypted/automesh-tls.cred
+LoadCredential=tls-cert:/etc/automesh-node/tls-cert.pem
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+AmbientCapabilities=
+LimitNOFILE=1024
+TasksMax=64
+MemoryMax=512M
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
