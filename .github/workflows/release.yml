@@ -5,7 +5,7 @@ on:
       version:
         description: Exact version in package.json (existing releases are never overwritten)
         required: true
-        default: '0.4.17'
+        default: '0.4.18'
 permissions:
   contents: read
 concurrency:
@@ -102,4 +102,4 @@ jobs:
         run: |
           tag="v$RELEASE_VERSION"
           if gh release view "$tag" >/dev/null 2>&1; then echo 'Release already exists; refusing overwrite'; exit 1; fi
-          gh release create "$tag" downloads/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Automesh Nodes $RELEASE_VERSION" --notes-file docs/RELEASE_0_4_17.md --latest
+          gh release create "$tag" downloads/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Automesh Nodes $RELEASE_VERSION" --notes-file docs/RELEASE_0_4_18.md --latest
