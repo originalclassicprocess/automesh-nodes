@@ -7,6 +7,8 @@ import { tokenBucket } from './limits.js';
 import { COURIER_PROTOCOL, validateCourierJob } from '../../protocol/src/courier-protocol.js';
 import { ATTACHMENT_PROTOCOL, validAttachmentRequest, validAttachmentChunk } from '../../protocol/src/attachment-protocol.js';
 
+import { INTRODUCTION_PROTOCOL, validIntroductionFrame } from '../../protocol/src/introduction.js';
+
 const MAX_SIGNALING_BYTES = 64 * 1024;
 const MAX_WATCHED_PEERS = 256;
 const HEARTBEAT_MS = 30_000;
@@ -79,6 +81,9 @@ export function createSignalingServer({
   wss.on('connection', (ws) => {
     registry.sockets.add(ws);
     const allowMessage = tokenBucket(messageRate, messageBurst);
+    const allowIntroduction = tokenBucket(4, 32);
+    const allowIntroductionReceive = tokenBucket(8, 64);
+    ws.allowIntroductionReceive = allowIntroductionReceive;
     const allowBytes = tokenBucket(256 * 1024, 1024 * 1024);
     const allowFileBytes = tokenBucket(2 * 1024 * 1024, 4 * 1024 * 1024);
     // Bound raw JSON parsing as well as accepted frames. Invalid JSON must not
@@ -189,7 +194,7 @@ export function createSignalingServer({
             myAddress = pending.address;
             clearTimeout(registrationTimer);
             peers.set(myAddress, ws);
-            send(ws, { type: 'registered', address: myAddress, registryId: registry.id, courierProtocol: COURIER_PROTOCOL, attachmentProtocol: ATTACHMENT_PROTOCOL, ...(iceMode ? { iceMode } : {}) });
+            send(ws, { type: 'registered', address: myAddress, registryId: registry.id, courierProtocol: COURIER_PROTOCOL, attachmentProtocol: ATTACHMENT_PROTOCOL, introductionProtocol: INTRODUCTION_PROTOCOL, ...(iceMode ? { iceMode } : {}) });
             notifyWatchers(myAddress, 'peer_online');
 
           })
@@ -202,6 +207,22 @@ export function createSignalingServer({
         return;
       }
 
+      if (msg.type === 'introduction') {
+        if (!isValidAccountId(myAddress) || !isValidAccountId(msg.to) || msg.to === myAddress ||
+            !validIntroductionFrame(msg)) { send(ws, { type: 'error', reason: 'invalid_introduction' }); return; }
+        const target = peers.get(msg.to);
+        if (!allowIntroduction() || target?.allowIntroductionReceive && !target.allowIntroductionReceive()) {
+          send(ws, { type: 'introduction_unavailable', address: msg.to, reason: 'introduction_busy' }); return;
+        }
+        if (target?.readyState !== WebSocket.OPEN) {
+          send(ws, { type: 'introduction_unavailable', address: msg.to, reason: 'peer_offline' }); return;
+        }
+        // Socket authentication fixes the sender. End-to-end signatures and
+        // domain-separated encryption are verified by clients. No disk queue.
+        send(target, { type: 'introduction', protocol: INTRODUCTION_PROTOCOL, from: myAddress,
+          to: msg.to, kind: msg.kind, ...(msg.kind === 'frame' ? { frame: msg.frame } : {}) });
+        return;
+      }
       if (msg.type === 'watch_peer') {
         if (!isValidAddress(msg.to, allowDiagnosticPeers) || msg.to === myAddress) {
           send(ws, { type: 'error', reason: 'invalid_target' });
