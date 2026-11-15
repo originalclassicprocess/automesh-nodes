@@ -1,3 +1,9 @@
+# 0.4.19 — Server notification wakes (2026-11-16)
+
+Optional signed Web Push wake relay after durable courier storage. Bounded private
+retry queue; approved providers only; no message text, push credentials or reverse
+reminders. Existing delivery and personal-node paths remain compatible.
+
 # 0.4.17 — Public release provenance (2026-11-09)
 
 Versioned, attested Windows/Linux/Server builds in the public repository. No transport/runtime changes.

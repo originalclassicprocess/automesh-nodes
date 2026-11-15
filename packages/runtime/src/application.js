@@ -22,6 +22,7 @@ import { DEVICE_DIRECTORY, DEVICE_PATHS } from '../../protocol/src/devices.js';
 import { QUEUE_LIMIT_REASONS, textReserve } from './queue-quota.js';
 import {CourierPrekeys} from './prekeys.js';
 import {COURIER_PREKEY_PROTOCOL,COURIER_PREKEY_PATHS} from '../../protocol/src/courier-prekeys.js';
+import {NotificationWakes,NOTIFICATION_WAKE_PROTOCOL} from './notification-wakes.js';
 
 const BODY_LIMIT = 192 * 1024;
 const queueCodes = new Set(['invalid_recipient_grant','invalid_envelope', 'invalid_ack', 'message_conflict', 'mailbox_full', 'courier_disabled', 'invalid_courier_job', 'invalid_courier_route', 'invalid_courier_author', 'invalid_courier_signature', 'invalid_attachment', 'invalid_attachment_part', 'attachment_conflict', 'attachment_incomplete', 'attachment_denied', 'attachment_digest_mismatch']);
@@ -59,6 +60,8 @@ export async function createHomeNode({ directory, tls, origins, hosts, adminToke
   const mailboxes = await new Mailboxes(directory, mailbox, state, { maxBytes, maxMessages, now }).initialize();
   const courier = await new Courier(directory, { maxBytes, maxMessages, maxFiles, maxFilesPerProfile, relay: courierRelay, testRelay, secretProtector, lanEnabled: signalingEnabled && localRouteScope === 'lan', localInternetEnabled: signalingEnabled && localRouteScope === 'internet',
     serialize, authorize: address => !state.failed && state.value.members.some(member => member.address === address) }).initialize();
+  let notificationWakes=null;
+  if(localRouteScope==='internet')try{notificationWakes=await new NotificationWakes(directory,{origins,now,permitted:address=>!state.failed&&state.value.members.some(member=>member.address===address)}).initialize();}catch{/* Optional notifications never prevent message delivery/startup. */}
   const prekeys=await new CourierPrekeys(join(directory,'courier-prekeys'),{nodeId:state.value.nodeId,now,
     maxBytes:Math.min(8*1024*1024,Math.floor(maxBytes/8)),isMember:address=>!state.failed&&state.value.members.some(m=>m.address===address)}).initialize();
   const devices = await new DeviceDirectory(directory, { maxBytes, maxMessages, now, nodeId: state.value.nodeId, publicKey: courier.publicKey,
@@ -148,7 +151,8 @@ export async function createHomeNode({ directory, tls, origins, hosts, adminToke
       if (panel && await panel.handle(request, response, { nodeId: state.value.nodeId, status: statusValue, invite: () => serialize(invite), remove: removeMember })) return;
       if (request.method === 'GET' && request.url === '/node/info') {
         json(response, 200, { protocol: NODE_PROTOCOL, nodeId: state.value.nodeId, role: localRouteScope === 'internet' ? 'server' : 'home',
-          capabilities: signalingEnabled ? ['signaling', 'opaque-mailbox', 'device-directory-v2'] : ['opaque-mailbox', 'device-directory-v2'], mailboxProtocol: MAILBOX_PROTOCOL,
+          capabilities: [...(signalingEnabled ? ['signaling', 'opaque-mailbox', 'device-directory-v2'] : ['opaque-mailbox', 'device-directory-v2']), ...(notificationWakes?['notification-wake-v1']:[])], mailboxProtocol: MAILBOX_PROTOCOL,
+          ...(notificationWakes?{notificationRelay:{protocol:NOTIFICATION_WAKE_PROTOCOL,providers:notificationWakes.providers}}:{}),
           deviceDirectory: { protocol: DEVICE_DIRECTORY, publicKey: courier.publicKey },
           paired: Boolean(state.value.owner), chatOfflineDelivery: true, multiMailbox: true, ...(panel ? { adminPanel: true } : {}),
           courierProtocol: 'automesh-courier-v1', courierAddress: courier.address, courierEnabled: courier.enabled, signalingEnabled,
@@ -199,6 +203,7 @@ export async function createHomeNode({ directory, tls, origins, hosts, adminToke
           memberCheck(identity);
           if (request.url === '/outbox/route') return courier.rememberRoute(identity.address,body.route);
           if (request.url === '/outbox/status') return {...courier.stats(identity.address),prekeyProtocol:COURIER_PREKEY_PROTOCOL,prekeyPeers:prekeys.summary(identity.address),
+            ...(notificationWakes?{notificationProtocol:NOTIFICATION_WAKE_PROTOCOL,notificationProviders:notificationWakes.providers}:{}),
             quota:{protocol:'automesh-queue-quota-v1',profileFiles:courier.stats(identity.address).attachments.files,profileFileLimit:courier.attachments.maxFilesPerProfile,
               ...courier.box.quota(identity.address),
               nodeFiles:courier.attachments.stats().files,nodeFileLimit:courier.attachments.maxFiles,reservedBytes:totalStats().bytes,maxBytes}};
@@ -213,7 +218,14 @@ export async function createHomeNode({ directory, tls, origins, hosts, adminToke
           if (request.url === '/outbox/file/part') return courier.attachments.put(identity.address, body.id, body.index, body.cipher);
           if (request.url === '/outbox/file/cancel') return courier.cancelFile(identity.address, body.job);
           courier.box.maxBytes = Math.max(0, maxBytes - mailboxes.stats().bytes - courier.attachments.stats().bytes - devices.stats().bytes - prekeys.stats().bytes);
-          try { return await courier.put(identity.address, body.job); }
+          try {
+            const result=await courier.put(identity.address,body.job);
+            if(notificationWakes&&body.notification&&result.status==='stored'&&!body.job.body.lanOnly){
+              let accepted=false;try{accepted=await notificationWakes.add(identity.address,body.job.body.to,body.notification);}catch{/* A failed optional wake must never roll back an already stored envelope. */}
+              return {...result,notificationAccepted:accepted};
+            }
+            return result;
+          }
           finally { courier.box.maxBytes = maxBytes; }
         }
         if (request.url === '/node/pair' || request.url === '/node/join') {
@@ -354,6 +366,7 @@ export async function createHomeNode({ directory, tls, origins, hosts, adminToke
       closing = true; clearInterval(sweep); panel?.close();
       courier.active = false;
       await operationChain;
+      await notificationWakes?.close();
       await courier.close();
       for (const signaling of signalingServers) {
         for (const socket of signaling.clients) socket.terminate();
