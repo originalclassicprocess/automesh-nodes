@@ -61,7 +61,7 @@ export async function createHomeNode({ directory, tls, origins, hosts, adminToke
   const courier = await new Courier(directory, { maxBytes, maxMessages, maxFiles, maxFilesPerProfile, relay: courierRelay, testRelay, secretProtector, lanEnabled: signalingEnabled && localRouteScope === 'lan', localInternetEnabled: signalingEnabled && localRouteScope === 'internet',
     serialize, authorize: address => !state.failed && state.value.members.some(member => member.address === address) }).initialize();
   let notificationWakes=null;
-  if(localRouteScope==='internet')try{notificationWakes=await new NotificationWakes(directory,{origins,now,permitted:address=>!state.failed&&state.value.members.some(member=>member.address===address)}).initialize();}catch{/* Optional notifications never prevent message delivery/startup. */}
+  try{notificationWakes=await new NotificationWakes(directory,{origins,now,permitted:address=>!state.failed&&state.value.members.some(member=>member.address===address)}).initialize();}catch{/* Optional notifications never prevent message delivery/startup. */}
   const prekeys=await new CourierPrekeys(join(directory,'courier-prekeys'),{nodeId:state.value.nodeId,now,
     maxBytes:Math.min(8*1024*1024,Math.floor(maxBytes/8)),isMember:address=>!state.failed&&state.value.members.some(m=>m.address===address)}).initialize();
   const devices = await new DeviceDirectory(directory, { maxBytes, maxMessages, now, nodeId: state.value.nodeId, publicKey: courier.publicKey,
@@ -210,13 +210,16 @@ export async function createHomeNode({ directory, tls, origins, hosts, adminToke
           if (request.url === '/outbox/list') return courier.outbox(identity.address,body);
           if (request.url === '/outbox/receipts') return { receipts: await courier.box.receipts(identity.address, body.ids) };
           if (request.url === '/outbox/outcomes') return { outcomes: await courier.box.outcomes(identity.address, body.ids), checkedAt: Date.now() };
-          if (request.url === '/outbox/cancel') return courier.cancel(identity.address, body.job);
+          if (request.url === '/outbox/cancel' || request.url === '/outbox/file/cancel') {
+            const result=await courier.cancel(identity.address,body.job);
+            try{await notificationWakes?.cancel(identity.address,body.job.body.to,body.job.body.id);}catch{/* Keep the confirmed primary cancellation. */}
+            return result;
+          }
           if (request.url === '/outbox/file/start') {
             courier.attachments.maxBytes = Math.max(0, maxBytes - mailboxes.stats().bytes - courier.box.stats().bytes - devices.stats().bytes - prekeys.stats().bytes - textReserve(maxBytes));
             try { return await courier.startFile(identity.address, body.job); } finally { courier.attachments.maxBytes = maxBytes; }
           }
           if (request.url === '/outbox/file/part') return courier.attachments.put(identity.address, body.id, body.index, body.cipher);
-          if (request.url === '/outbox/file/cancel') return courier.cancelFile(identity.address, body.job);
           courier.box.maxBytes = Math.max(0, maxBytes - mailboxes.stats().bytes - courier.attachments.stats().bytes - devices.stats().bytes - prekeys.stats().bytes);
           try {
             const result=await courier.put(identity.address,body.job);
