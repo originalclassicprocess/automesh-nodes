@@ -45,6 +45,11 @@ export class NotificationWakes{
     }catch{return false;}
   }
   serial(work){const result=this.chain.then(work);this.chain=result.catch(()=>{});return result;}
+  cancel(sender,to,messageId){return this.serial(async()=>{
+    const event=createHash('sha256').update(`automesh-notifications-v1:${sender}:${to}:${messageId}`).digest('base64url');
+    const prior=this.jobs;this.jobs=prior.filter(j=>j.sender!==sender||j.to!==to||j.input.body.event!==event);
+    try{await this.save();}catch(e){this.jobs=prior;throw e;}
+  });}
   save(){return writeAtomic(this.directory,'pending.json',{version:1,jobs:this.jobs});}
   async add(sender,to,value){
     if(this.stopped||!exact(value,['protocol','requests'])||value.protocol!==NOTIFICATION_WAKE_PROTOCOL||!Array.isArray(value.requests)||value.requests.length>4)return false;
@@ -62,7 +67,7 @@ export class NotificationWakes{
     this.running=(async()=>{
       for(let n=0;n<8&&!this.stopped;n++){
         const job=await this.serial(async()=>this.jobs.find(j=>j.due<=this.now()&&j.expires>this.now()&&j.attempts<4));if(!job)break;
-        let done=!this.permitted(job.sender);
+        let done=!this.permitted(job.sender)||!this.jobs.some(j=>j.id===job.id);
         if(!done)try{await this.send(job.provider,job.input);done=true;}catch(e){done=[400,401,403,404,410].includes(e.statusCode);}
         await this.serial(async()=>{const prior=this.jobs;if(done)this.jobs=this.jobs.filter(j=>j.id!==job.id&&j.expires>this.now());else this.jobs=this.jobs.map(j=>j.id===job.id?{...j,attempts:j.attempts+1,due:this.now()+15000*2**j.attempts}:j).filter(j=>j.expires>this.now());try{await this.save();}catch(e){this.jobs=prior;throw e;}});
       }

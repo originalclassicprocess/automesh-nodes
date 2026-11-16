@@ -1,3 +1,9 @@
+# 0.4.20 — Home notification wakes (2026-11-16)
+
+Home-role nodes use the same bounded, signed wake relay as server nodes.
+Canceling an outbox item removes its pending wake retry. Existing delivery
+formats and installed personal nodes remain unchanged.
+
 # 0.4.19 — Server notification wakes (2026-11-16)
 
 Optional signed Web Push wake relay after durable courier storage. Bounded private
