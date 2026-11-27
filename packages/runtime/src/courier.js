@@ -127,7 +127,7 @@ export class Courier {
     return { protocol: COURIER_ROUTE_PROTOCOL, accepted: true };
   }
   routeFor(job) {
-    if (job.body.lanOnly || job.body.attachment) return null;
+    if (job.body.lanOnly) return null;
     const known = this.learnedRoutes.get(this.routeKey(job.body.from,job.body.to));
     const original = job.body.route;
     const route = known && (!original || known.body.issuedAt >= original.body.issuedAt) ? known : original;
@@ -138,7 +138,7 @@ export class Courier {
     const candidates = new Map();
     for (const record of records) {
       const job = this.decode(record), b = this.routeFor(job)?.body;
-      if (!b || job.body.lanOnly || job.body.attachment || b.expiresAt <= Date.now() || b.nodeAddress === this.address ||
+      if (!b || b.nodeAddress === this.address ||
           [...this.routes.values()].some(r => !r.discovered && r.url === b.signalingUrl)) continue;
       const key = `discovered:${b.signalingUrl}`;
       candidates.set(key, b);
@@ -252,11 +252,14 @@ export class Courier {
         route.reconnect = setTimeout(() => this.connect(route), Math.min(30000, 1000 * 2 ** Math.min(route.attempt++, 5)) + Math.random() * 1000); route.reconnect.unref(); }
     });
   }
-  async flush() {
-    if (!this.active) return;
+  async sweepQueue() {
     await this.box.serialized(() => this.box.sweep());
     await this.attachments.sweep();
     for (const [id,r] of this.attachments.records) if (['acknowledged','canceled','expired'].includes(this.box.records.get(r.job.body.id.replaceAll('-',''))?.status)) await this.attachments.remove(id);
+  }
+  async flush() {
+    if (!this.active) return;
+    await this.sweepQueue();
     const records = [...this.box.records.values()].filter(r => r.status === 'stored' && this.authorize(r.sender));
     this.syncDiscovered(records);
     if (!this.ready) return;
@@ -346,6 +349,7 @@ export class Courier {
     if (!validAttachmentRequest(msg.request) || msg.to !== this.address || msg.request.body.from !== msg.from || msg.request.body.to !== this.address) return;
     const b = msg.request.body, r = this.attachments.records.get(b.id);
     if (!r?.complete || !this.authorize(r.job.body.from) || r.job.body.to !== msg.from || (route.name !== 'lan' && r.job.body.lanOnly) ||
+        (route.discovered && this.routeFor(r.job)?.body.signalingUrl !== route.url) ||
         this.box.records.get(r.job.body.id.replaceAll('-', ''))?.status !== 'stored') return;
     await verifyCourierSignature(msg.request, 'attachment-request', msg.from);
     const cipher = await this.attachments.get(b.id, b.index);

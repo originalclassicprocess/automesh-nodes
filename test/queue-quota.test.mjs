@@ -152,6 +152,8 @@ test('signed HTTP API returns an optional precise quota reason and reserves mess
   assert.equal(capacity.quota.nodeFiles,1);assert.equal(capacity.quota.nodeFileLimit,1);
   assert.equal(capacity.quota.profileMessages,0);assert.equal(capacity.quota.profileMessageLimit,100);assert.equal(capacity.quota.nodeMessageLimit,1000);
   assert.equal(capacity.messages,0); // staged upload uses a slot before an envelope is committed
+  assert.deepEqual(capacity.storedIds, []);
+  assert.ok(capacity.quota.profileFileBytes > first.body.attachment.size);
   assert.equal((await api('/outbox/list',{})).value.jobs[0].body.id,first.body.id);
   assert.equal((await api('/outbox/list',{},recipient)).value.jobs.length,0);
   assert.notEqual((await fetch(url+'/outbox/list',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status,200);
@@ -161,8 +163,11 @@ test('signed HTTP API returns an optional precise quota reason and reserves mess
   const rejected = await api('/outbox/file/start', { job: second });
   assert.notEqual(rejected.status, 200);
   assert.deepEqual(rejected.value, { error: 'mailbox_full', limit: 'profile_files' });
-  assert.equal((await api('/outbox/put', { job: await job(service.courier.address, sender, recipient) })).status, 200);
-  assert.equal((await api('/outbox/status',{})).value.quota.profileMessages,1);assert.equal((await api('/outbox/status',{},recipient)).value.quota.profileMessages,0);
+  const text = await job(service.courier.address, sender, recipient);
+  assert.equal((await api('/outbox/put', { job: text })).status, 200);
+  const senderStatus = (await api('/outbox/status',{})).value, recipientStatus = (await api('/outbox/status',{},recipient)).value;
+  assert.equal(senderStatus.quota.profileMessages,1);assert.equal(recipientStatus.quota.profileMessages,0);
+  assert.deepEqual(senderStatus.storedIds,[text.body.id.replaceAll('-','')]);assert.deepEqual(recipientStatus.storedIds,[]);
 });
 
 test('message capacity uses actual configured limits and separates retained receipts from pending messages',async()=>{

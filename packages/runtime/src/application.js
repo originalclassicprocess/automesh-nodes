@@ -202,11 +202,17 @@ export async function createHomeNode({ directory, tls, origins, hosts, adminToke
         if (request.url.startsWith('/outbox/')) {
           memberCheck(identity);
           if (request.url === '/outbox/route') return courier.rememberRoute(identity.address,body.route);
-          if (request.url === '/outbox/status') return {...courier.stats(identity.address),prekeyProtocol:COURIER_PREKEY_PROTOCOL,prekeyPeers:prekeys.summary(identity.address),
-            ...(notificationWakes?{notificationProtocol:NOTIFICATION_WAKE_PROTOCOL,notificationProviders:notificationWakes.providers}:{}),
-            quota:{protocol:'automesh-queue-quota-v1',profileFiles:courier.stats(identity.address).attachments.files,profileFileLimit:courier.attachments.maxFilesPerProfile,
-              ...courier.box.quota(identity.address),
-              nodeFiles:courier.attachments.stats().files,nodeFileLimit:courier.attachments.maxFiles,reservedBytes:totalStats().bytes,maxBytes}};
+          if (request.url === '/outbox/status') {
+            await courier.sweepQueue();
+            const profile = courier.stats(identity.address);
+            const storedIds = [...courier.box.records.values()].filter(record =>
+              record.sender === identity.address && record.status === 'stored').map(record => record.id);
+            return {...profile,storedIds,prekeyProtocol:COURIER_PREKEY_PROTOCOL,prekeyPeers:prekeys.summary(identity.address),
+              ...(notificationWakes?{notificationProtocol:NOTIFICATION_WAKE_PROTOCOL,notificationProviders:notificationWakes.providers}:{}),
+              quota:{protocol:'automesh-queue-quota-v1',profileFiles:profile.attachments.files,profileFileBytes:profile.attachments.bytes,
+                profileFileLimit:courier.attachments.maxFilesPerProfile,...courier.box.quota(identity.address),
+                nodeFiles:courier.attachments.stats().files,nodeFileLimit:courier.attachments.maxFiles,reservedBytes:totalStats().bytes,maxBytes}};
+          }
           if (request.url === '/outbox/list') return courier.outbox(identity.address,body);
           if (request.url === '/outbox/receipts') return { receipts: await courier.box.receipts(identity.address, body.ids) };
           if (request.url === '/outbox/outcomes') return { outcomes: await courier.box.outcomes(identity.address, body.ids), checkedAt: Date.now() };
