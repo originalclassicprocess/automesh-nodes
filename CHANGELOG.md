@@ -1,3 +1,9 @@
+# 0.4.21 — Signed file routes (2026-11-27)
+
+File envelopes can use a recipient's existing signed signaling route.
+Profile quota snapshots include stored envelope IDs and space reserved for
+profile files after expired queue items have been swept.
+
 # 0.4.20 — Home notification wakes (2026-11-16)
 
 Home-role nodes use the same bounded, signed wake relay as server nodes.
